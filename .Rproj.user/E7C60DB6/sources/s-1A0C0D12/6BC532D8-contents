@@ -1,0 +1,587 @@
+---
+title: "JSC370 Midterm"
+author: "Shiyuan Zhou"
+date: "2022/2/27"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+How humans can live longer is one of the most debated topics in human history. In an era of rapid advances in medicine, education, and technology, human health has improved significantly but will humans necessarily live longer? The differences between countries are not only due to race and region but the imbalance on health care and medical technologies across countries is everywhere. However, in many cases, it is difficult to spread or teach advanced medical treatments to other countries. Does the absence of advanced medical treatments determines lower average life expectancy? Obviously, the answer is no. Medical treatment is not the only factor that determines the life expectancy of human beings but also the climate and environment, social factors, etc.
+
+In fact, most of the influencing factors come from the government and the social organizations involved. We have a certain measure of whether the government is making a difference in humanistic care, which is the Human Development Index (HDI). The HDI is defined as a summary measure of average achievement in key dimensions of human development, like health. Also, social care as well as health care development cannot be achieved without the government expenditure. That is, at the theoretical level, both the HDI and government expenditure on health care may have an impact on the health of people, leading to an increase in their average life expectancy. However, governments' decisions heavily depends on the level of development of the country, i.e., whether a country is a developed country or not also affects the health policy and the standard of living of the population. These thoughts have led me to wonder whether life expectancy has a stronger relationship between human development index or government health care spending. Additionally, whether these relationships will be altered by the degree of development.
+
+Github Repository: https://github.com/ZhouEEEEEE/JSC370-Midterm.git
+
+## Research Question
+Is government health expenditure have higher impact on life expectancy than Human Development Index? Does it also depends on the development status of the country?
+
+\newpage
+
+# Methods
+
+## Used R packages
+```{r, message=FALSE, warning=FALSE, include=FALSE}
+library(data.table)
+library(dtplyr)
+library(dplyr)
+library(ggplot2)
+library(mgcv)
+library(zoo)
+library(leaflet)
+library(ggpubr)
+```
+Here are the following R packages that I used for this portfolio.:
+data.table
+dtplyr
+dplyr
+ggplot2
+mgcv
+zoo
+leaflet
+ggpubr
+
+## Data Source
+
+
+The Data that I used to answer my research question is based on the WHO data and published on Kaggle by Kumar Rajarshi. This dataset includes values social factors of 193 countries from 2000 to 2015 and the life expectancy in age. In our research question, we are aim to compare the impact of government health expenditure and Human Development Index on life expectancy. These two predictors are represent by 'Total expenditure' and 'Income composition of resources' in our dataset. The target is life expectancy. Since we also stated that social factors may have a big difference between developed and developing countries. We sill also include the binary variable 'Status' that idicate the development status of a country. All of these variables will change across years. Here are the variable details.
+
+life expectancy: Life Expectancy in age
+Total expenditure: General government expenditure on health as a percentage of total government expenditure (%)
+Income composition of resources: Human Development Index in terms of income composition of resources (index ranging from 0 to 1)
+Status: Developed or Developing status
+
+Link of data: https://www.kaggle.com/kumarajarshi/life-expectancy-who
+```{r include=FALSE}
+data <- read.csv('Life Expectancy Data.csv', check.names = F)
+```
+\newpage
+## Data Checking
+
+Before answering our research question, we need to do Exploratory Data Analysis first to find issues in our data, clean our data, and make summary statistics, plots, and graphs for our key variables.
+
+### Check number of missing values in each column
+
+
+```{r echo=FALSE}
+num_na <-sapply(data, function(x) sum(length(which(is.na(x)))))
+knitr::kable(data.frame(num_na), caption = "Number of missing values for each variable")
+```
+
+The table I presented is the number of missing values in each columns. For example, there are 167 missing values in Income composition of resources. We will do the missing value imputation in the next section.
+
+### Check dimensions of our data
+
+```{r echo=FALSE}
+s1 <- data %>%
+  summarise(
+    axis = c("num_observations", "num_variables"),
+    value = c(nrow(data), ncol(data))
+  )
+
+knitr::kable(s1, caption = "Summery table of the dimensions of our data")
+
+```
+We have 2937 number of observations and 22 number of variables in our dataset.
+
+### Check the summary statistics of required numeric variables
+
+```{r echo=FALSE}
+s2 <- data[, c(4, 14, 21)] %>%
+  summary()
+
+knitr::kable(as.array(s2), caption = "Summary statistics of required variables")
+
+```
+The summary statistics of key variables help us to find the issues and reliability of our data. According to the summary table we get, variable 'Life expectancy' and 'Total expenditure' do not have big issues and in our estimated bound(life expectancy should be greater than 0 and less than 100, total expenditure should be greater than 0 and less than 100 since it represents proportion). However, the variable 'income composition of resources' has minimum values equals to 0. Since this variable indicate human development index, its impossible to have 0 values. According to the worldpopulationreview.com, the country with lowest HDI in 2019 is Niger with 0.394. Hence, 0 income composition should be removed from the data set in order to prevent wrong model fitting.
+
+```{r echo=FALSE}
+data <- data[ which(data$ `Income composition of resources` > 0.0), ]
+```
+
+We removed the observations with 0 income composition and the new summary statistics is as followed.
+
+```{r echo=FALSE}
+snew <- data[, c(4, 14, 21)] %>%
+  summary()
+
+knitr::kable(as.array(snew), caption = "New summary statistics of required variables")
+
+```
+
+
+\newpage
+
+
+### Check Distribution of required variables
+
+We need to check the distribution of our variables. This helps to determine outliers, skewness, and whether it is appropriate to fit the model.
+
+```{r warning=FALSE, echo=FALSE, caption = "Check Distribution of required variables"}
+hs <- ggplot(data = data) + 
+ geom_histogram(mapping = aes(x = `Life expectancy`), bins = 40, fill = "#8250C4")  +
+ labs(x = "life expectancy in age", title = "Histogram of life expectancy")
+
+hs1 <- ggplot(data = data) + 
+ geom_histogram(mapping = aes(x = `Total expenditure`), bins = 40, fill = "#8250C4")  +
+ labs(x = "total expenditure", title = "Histogram of total health expenditure")
+
+hs2 <- ggplot(data = data) + 
+ geom_histogram(mapping = aes(x = `Income composition of resources`), bins = 40, fill = "#8250C4")  +
+ labs(x = "Income composition of resources(ICR)", title = "Histogram of ICR")
+
+ba <- ggplot(data = data) + 
+ geom_bar(mapping = aes(x = `Status`), fill = "#118DFF") +
+ labs(title = "Barchart of development status") +
+  theme_light()
+
+ggarrange(hs, hs1, hs2, ba, ncol = 2, nrow = 2)
+
+```
+According to the histograms we have for those three numeric variables, their distribution is almost normal, indicating linear model may be better options. However, there are also several issues. Firstly, the distribution of ICR is bimodal, the distribution of life expectancy is left skewed, and the distribution of total health expenditure is right-skewed. Secondly, the peak value of life expectancy and health expenditure have a very high count, which may pull our model become more centralized. Thirdly, according to the bar chart, the number of  developing county is much more that that of developed country, which means, if we add status variable to our model, the data of developing country may pull our model and become biased.
+
+\newpage
+
+## Data Wranggling
+
+### Missing values imputation
+
+```{r echo=FALSE, warning=FALSE}
+for(i in 1:ncol(data)) {
+  data[ , i][is.na(data[ , i])] <- mean(data[ , i], na.rm = TRUE)
+}
+```
+
+Firstly, we need to handle the missing values by imputation. We use mean value of current column to impute by for looping each column. 
+
+```{r echo=FALSE}
+
+ms <- data.frame(number_of_NAs = sum(is.na(data)))
+
+knitr::kable(ms, caption = "Number of missing values in currect dataset")
+
+```
+After imputation, we find the number of missing values is zero.
+
+### Create new variable
+To do further data exploration on different types of plots, we need both numeric and categorical 'Total expenditure' and 'Income composition of resources'. Converting current numeric variables to categorical variables helps us on stacked histograms, statistical summary graph, and etc. In many statistical research on social factors, health expenditure and HDI are always represented by different levels.
+
+Create a new categorical variable named "expenditure_level" using total expenditure on health of a country. (rare total expenditure < 3; low total expenditure 3-5; mild total expenditure 5-9; high total expenditure > 9) and a new categorical variable named "hdi_level" indicating level of income composition of resources of countries(low income composition < 0.55; medium income composition 0.55-0.7; high income composition 0.7-0.8; very high income composition > 0.8). Additionally, we should use factor() function to give our levels an order for future convenience.
+
+```{r echo=FALSE}
+dt <- data.table(data)
+
+dta <- dt[, expenditure_level := case_when(dt[, `Total expenditure`] < 3 ~ "low", 
+                               dt[, `Total expenditure`] <= 5 ~ "medium",
+                               dt[, `Total expenditure`] <= 9 ~ "high",
+                               dt[, `Total expenditure`] > 9 ~ "very high")
+      ]
+
+dt1 <- dta[, hdi_level := case_when(dta[, `Income composition of resources`] < 0.55 ~ "low", 
+                               dta[, `Income composition of resources`] <= 0.7 ~ "medium",
+                               dta[, `Income composition of resources`] <= 0.8 ~ "high",
+                               dta[, `Income composition of resources`] > 0.8 ~ "very high")]
+
+dt1$expenditure_level <- factor(dt1$expenditure_level, levels = c("low", "medium", "high", "very high"))
+dt1$hdi_level <- factor(dt1$hdi_level, levels = c("low", "medium", "high", "very high"))
+
+sexp <- dt1 %>% group_by(expenditure_level) %>%
+  summarise(
+    min_exp = min(`Total expenditure`, na.rm = TRUE),
+    max_exp = max(`Total expenditure`, na.rm = TRUE),
+    count = n()
+  ) %>% arrange(expenditure_level)
+knitr::kable(sexp, caption = "Summery table of min total expenditure, max total expenditure, and number of observations for each level of total expenditure")
+
+shdi <- dt1 %>% group_by(hdi_level) %>%
+  summarise(
+    min_exp = min(`Income composition of resources`, na.rm = TRUE),
+    max_exp = max(`Income composition of resources`, na.rm = TRUE),
+    count = n()
+  ) %>% arrange(hdi_level)
+knitr::kable(shdi, caption = "Summery table of min income composition of resources, max income composition of resources, and number of observations for each level of HDI
+")
+
+```
+
+
+```{r warning=FALSE, echo=FALSE, caption = "Barchart of expenditure level", fig.width=8, fig.height=3}
+expl <- ggplot(data = dt1) + 
+ geom_bar(mapping = aes(x = expenditure_level), fill = "#118DFF") +
+ labs(title = "Barchart of expenditure level") +
+  theme_light()
+
+hdi_l <- ggplot(data = dt1) + 
+ geom_bar(mapping = aes(x = hdi_level), fill = "#118DFF") +
+ labs(title = "Barchart of HDI level") +
+  theme_light()
+
+ggarrange(expl, hdi_l, ncol = 2, nrow = 1)
+
+```
+
+For most of the observations, they spend high level of health expenditure. There are fewer observations have low and very high health expenditure. However, for HDI level, most of the counties have low HDI level and the number of observations for each level do not have big gap.
+
+\newpage
+
+# Preliminary Results Section
+
+## Summary statistics of key predictors to life expectancy
+
+```{r echo=FALSE}
+s4 <- dt1 %>% group_by(expenditure_level) %>%
+  summarise(
+  min_life_ex = min(`Life expectancy`),
+  max_life_ex = max(`Life expectancy`),
+  mean_life_ex = mean(`Life expectancy`, na.rm = TRUE),
+  sd_life_ex = sd(`Life expectancy`, na.rm = TRUE)
+  )
+
+knitr::kable(s4, caption = "Summery table of min life expectancy, max life expectancy, mean life expectancy, and standard deviation of life ecpectancy for each expenditure level")
+```
+
+According to the table above, there are no trend of any statistics of life expectancy across each level of health expenditure, which means we may not have a strong linear relationship between total expenditure and life expectancy. Additionally, the standard deviation of life expectancy for each level is pretty big, indicating that for each level we may have a big range of life expectancy which also shows weak relationship between those two variables.
+
+```{r echo=FALSE}
+s6 <- dt1 %>% group_by(hdi_level) %>%
+  summarise(
+    min_life_ex = min(`Life expectancy`),
+  max_life_ex = max(`Life expectancy`),
+  mean_life_ex = mean(`Life expectancy`, na.rm = TRUE),
+  sd_life_ex = sd(`Life expectancy`, na.rm = TRUE)
+  )
+
+knitr::kable(s6, caption = "Summery table of  min life expectancy, max life expectancy, mean life expectancy, and standard deviation of life ecpectancy for each human development index level")
+```
+
+The table we have for HDI level shows a increasing trend of statistics of life expectancy across levels except standard deviation, which may shows a positive relationship between HDI and life expectancy. Also, compare to standard deviation we have in table of expenditure, that of HDI is much lower, indicating a more concentrated values of life expectancy for each level.
+
+```{r echo=FALSE}
+s5 <- dt1 %>% group_by(`Status`) %>%
+  summarise(
+      min_life_ex = min(`Life expectancy`),
+  max_life_ex = max(`Life expectancy`),
+  mean_life_ex = mean(`Life expectancy`, na.rm = TRUE),
+  sd_life_ex = sd(`Life expectancy`, na.rm = TRUE)
+  )
+
+knitr::kable(s5, caption = "Summery table of  min life expectancy, max life expectancy, mean life expectancy, and standard deviation of life ecpectancy for developed and developing countries")
+
+```
+
+The table we have for development status reflects that more developed countries have much higher stable(due to standard deviation) estimate on life expectancy compare to that of developing countries.
+
+\newpage
+
+## Visualizations
+
+### Histograms
+
+```{r warning=FALSE, echo=FALSE, caption = "Histograms", fig.width=8, fig.height=8}
+hst1 <- ggplot(data = dt1) + 
+ geom_histogram(mapping = aes(x = `Life expectancy`, fill = expenditure_level), bins = 30) +
+ scale_fill_manual(values = c("pink", "palevioletred1", "violetred3", "brown3")) +
+ labs(x = "Life expectancy(age)", title = "Histogram of life expectancy by expenditure level")
+
+hst2 <- ggplot(data = dt1) + 
+ geom_histogram(mapping = aes(x = `Life expectancy`, fill = hdi_level), bins = 30) +
+ scale_fill_manual(values = c("slategray2", "skyblue3", "slateblue1", "slateblue4")) +
+ labs(x = "Life expectancy(age)", title = "Histogram of life expectancy by HDI level")
+
+ggarrange(hst1, hst2, ncol = 1, nrow = 2)
+```
+
+The first plot we have is the stacked histograms of life expectancy by expenditure level and HDI level. The proportion of each level of expenditure does not make a big difference across different ages. However, in the stacked histogram for HDI level, it is very clear that higher HDI level become more concentrated on the right, which is higher age. For different range of age, there always have a dominated HDI level. For example, for life expectancy less than 60, low HDI level dominates. Hence, according to these histograms, income composition of resources have a stronger relationship with life expectancy.
+
+\newpage
+
+### Bar Chart
+
+```{r warning=FALSE, echo=FALSE, caption = "Barchart", fig.width=8, fig.height=3.5}
+bar1 <- ggplot(data = dt1) + 
+ geom_bar(mapping = aes(x = expenditure_level, fill = `Status`)) +
+  scale_fill_manual(values = c("pink", "darkred")) +
+ labs(title = "Barchart of expenditure level by development status", x = "expenditure level")
+
+bar2 <- ggplot(data = dt1) + 
+ geom_bar(mapping = aes(x = hdi_level, fill = `Status`)) +
+  scale_fill_manual(values = c("pink", "darkred")) +
+ labs(title = "Barchart of HDI level by development status", x = "HDI level")
+
+ggarrange(bar1, bar2, ncol = 2, nrow = 1)
+
+```
+
+According to the barcharts we have for categorical variables expenditure level and HDI level by development status, developed countries tend to have higher expenditure and income composition of resources. However, the trend between HDI level and development status is stronger.
+
+```{r warning=FALSE, echo=FALSE, caption = "Barchart of Expenditure level by HDI level", fig.width=8, fig.height=4.5}
+ggplot(data = dt1) + 
+ geom_bar(mapping = aes(x = expenditure_level, fill = hdi_level)) +
+  scale_fill_manual(values = c("pink", "palevioletred1", "violetred3", "darkred")) +
+ labs(title = "Barchart of Expenditure level by HDI level", x = "Expenditure level")
+```
+
+According to the bar chart we get for expenditure level by HDI level, the proportion of low and high HDI level is the largest in the low expenditure level. The proportion of medium HDI level is the largest in medium expenditure level and also for high and very high level. Hence, we could say counties with high expenditure level have higher probability to have high HDI level. Predictors expenditure and HDI may have a linear relationship.
+
+\newpage
+
+### Statistical summary graph
+
+```{r warning=FALSE, echo=FALSE, caption = "Statistical summary graph of FEV by BMI", fig.width=8, fig.height=4}
+
+a <- ggplot(data = dt1) + 
+ stat_summary(mapping = aes(x = expenditure_level, y = `Life expectancy`), fun.min = min,fun.max = max,fun = median, size = 1.5) +
+  labs(y = "life expectancy", x = "expenditure level") + theme_minimal()
+
+b <- ggplot(data = dt1) + 
+ stat_summary(mapping = aes(x = expenditure_level, y = `Life expectancy`, color = `Status`), fun.min = min, fun.max = max,fun = mean, size = 1.5) +
+  labs(y = "life expectancy", x = "expenditure level") + theme_minimal()
+
+ggarrange(a, b, ncol = 2, nrow = 1)
+```
+
+According to the statistical summary graph for expenditure level, though mean of life expectancy in low level of expenditure level is higher, we may have an increasing trend between expenditure level and life expectancy. However, if we adjusted by development status, we can see that the trend is clear for developing countries but not for developed countries. The higher mean of life expectancy in low level of expenditure was pulled up by the values of developed countries as the orange points shows. Additionally, the range of life expectancy for each expenditure level as the distance from min to max is large, which means our model may not fit tightly.
+
+```{r warning=FALSE, echo=FALSE, caption = "Statistical summary graph of FEV by BMI", fig.width=8, fig.height=4}
+
+a <- ggplot(data = dt1) + 
+ stat_summary(mapping = aes(x = hdi_level, y = `Life expectancy`), fun.min = min,fun.max = max,fun = median, size = 1.5) +
+  labs(y = "life expectancy", x = "HDI level") + theme_minimal()
+
+b <- ggplot(data = dt1) + 
+ stat_summary(mapping = aes(x = hdi_level, y = `Life expectancy`, color = `Status`), fun.min = min,fun.max = max,fun = mean, size = 1.5) +
+  labs(y = "life expectancy", x = "HDI level") + theme_minimal()
+
+ggarrange(a, b, ncol = 2, nrow = 1)
+```
+
+The statistical summary graph we have for HDI level shows a positive relationship between human development index and life expectancy. Adjusting by development status did not make a difference on our relationship. Additionally, the distance between min and max is much shorter than that in expenditure level which indicate a strong relationship and a tighter model fit.
+
+\newpage
+
+### Scatterplots
+```{r warning=FALSE, echo=FALSE, caption = "Life expectancy vs total expenditure", message=FALSE, fig.width=10, fig.height=8}
+k <- ggplot(data = dt1) + 
+ geom_point(mapping = aes(x = `Total expenditure`, y = `Life expectancy`, color = `Status`), size = 0.5) + 
+ geom_smooth(mapping = aes(x = `Total expenditure`, y = `Life expectancy`), method = 'lm') +
+ labs(title = "Life expectancy vs total expenditure", x = "Total health expenditure", y = "Life expectancy") + theme_light() +
+  theme(legend.position='none')
+
+s <- ggplot(dt1, aes(x = `Total expenditure`, y = `Life expectancy`, color = `Status`)) +
+  geom_point(size = 0.5) +
+  geom_smooth(data = dt1, formula = y ~ s(x, bs="cr",k=5), method = "gam", col=2) +
+  labs(title = "Life expectancy vs total expenditure", x = "Total health expenditure", y = "Life expectancy") + theme_light() +
+  theme(legend.position='none')
+
+v <- ggplot(data = dt1) + 
+ geom_point(mapping = aes(x = `Income composition of resources`, y = `Life expectancy`, color = `Status`), size = 0.5) + 
+ geom_smooth(mapping = aes(x = `Income composition of resources`, y = `Life expectancy`), method = 'lm') +
+ labs(title = "Life expectancy vs ICR", x = "Income composition of resources", y = "Life expectancy") +
+  theme_light() +
+  theme(legend.position='none')
+
+z <- ggplot(dt1, aes(x = `Income composition of resources`, y = `Life expectancy`, color = `Status`)) +
+  geom_point(size = 0.5) +
+  geom_smooth(data = dt1, formula = y ~ s(x, bs="cr",k=5), method = "gam", col=2) +
+  theme_light() +
+  labs(title = "Life expectancy vs ICR", x = "Income composition of resources", y = "Life expectancy") + theme(legend.position = c(0.8, 0.2))
+ggarrange(k, s, v, z, ncol = 2, nrow = 2)
+```
+
+The scatter plot of live expectancy vs total health expenditure and income composition of resources clearly present what actual model fitting will be in our dataset. The two plots with two blue straight line on the left is the linear model fitted in each of the relationship. The two plots on the right is the cubic spline model we have, where the red curve is the fitted splines. 
+
+According to the plots we have for live expectancy vs total health expenditure, the linear model is not very fitted to our data. Spline model could explain more variation and yields better fit but the decreasing trend when total health expenditure is greater than 12.5 may comes from overfitting on the right-most points. Comparing to what we have in life expectancy vs income composition of resources, a positive linear trend is pretty clear. However, the fitted spline model does not make a big difference than the linear model. We need to further decide which model is better by adjusted R squared since spline model may have a higher adjusted R squared but the cost is overfitting.
+
+
+\newpage
+
+
+## Model Fitting
+
+```{r echo=FALSE}
+ds <- dt1[, c(3, 4, 14, 21, 22, 23)]
+colnames(ds) <- c('status', 'life_exp', 'total_exp', 'income_com', 'exp_level', 'hdi_level')
+```
+
+```{r echo=FALSE}
+ds <- ds[, status_ind := case_when(status == "Developed" ~ 1, 
+                                   status == "Developing" ~ 0)
+
+      ]
+```
+
+To compare which factor have stronger relationship with life expectancy, we use them as predictors and fit both linear and spline models. Since we also want to add consideration of development status, we will fit all the models and adjusted by status again. Additionally, we should also fit full models to see whether using both total expenditure and income composition of resources predict life expectancy better.
+
+a) Models without adjusted by development status
+   
+   Linear models:  
+   
+   Total expenditure as predictor: lm(life_exp ~ total_exp, data = ds)  
+   Income composition of resources as predictor: lm(life_exp ~ income_com, data = ds)  
+   Total expenditure and income composition as predictor: lm(life_exp ~ income_com + total_exp, data = ds)  
+   
+   Spline models:  
+   
+   Total expenditure as smooth terms: gam(life_exp~ s(total_exp,bs="cr",k=3),data=ds)  
+   Income composition of resources as smooth terms: gam(life_exp~ s(income_com,bs="cr",k=3),data=ds)  
+   Income composition of resources as smooth terms adjusted by total expenditure: gam(life_exp~ s(income_com,bs="cr",k=3) + total_exp,data=ds)  
+   Total expenditure as smooth terms adjusted by income composition of resources: gam(life_exp~ s(total_exp,bs="cr",k=3) + income_com,data=ds)  
+
+b) Models with adjusted by development status
+
+   Linear models:  
+   total expenditure and status as predictor: lm(life_exp ~ total_exp + status_ind, data = ds)  
+   income composition of resources and status as predictor: lm(life_exp ~ income_com + status, data = ds)  
+   total expenditure, income composition, and status as predictor: lm(life_exp ~ income_com + total_exp + status, data = ds)  
+
+   Spline models:  
+   total expenditure as smooth terms adjusted by status: gam(life_exp~ s(total_exp, bs="cr",k=5) + status,data=ds)  
+   income composition of resources as smooth terms adjusted by status: gam(life_exp~ s(income_com, bs="cr",k=3) + status, data=ds)  
+   income composition of resources as smooth terms adjusted by total expenditure and status: gam(life_exp~ s(income_com,bs="cr",k=3) + total_exp + status, data=ds)  
+   total expenditure as smooth terms adjusted by income composition of resources and status: gam(life_exp~ s(total_exp,bs="cr",k=3) + income_com + status, data=ds)  
+
+
+```{r echo=FALSE}
+sp1 <- gam(life_exp~ s(total_exp,bs="cr",k=3),data=ds)
+rsqsp1 <- summary(sp1)$r.sq
+
+lmte <- lm(life_exp ~ total_exp, data = ds)
+rsqlm1 <- summary(lmte)$r.squared
+```
+
+```{r echo=FALSE}
+sp2 <- gam(life_exp~ s(income_com,bs="cr",k=3),data=ds)
+rsqsp2 <- summary(sp2)$r.sq
+
+lmic <- lm(life_exp ~ income_com, data = ds)
+rsqlm2 <- summary(lmic)$r.squared
+```
+
+```{r echo=FALSE}
+spfull1 <- gam(life_exp~ s(income_com,bs="cr",k=3) + total_exp,data=ds) # knots = 10
+rsqfullsp1 <- summary(spfull1)$r.sq
+
+spfull2 <- gam(life_exp~ s(total_exp,bs="cr",k=3) + income_com,data=ds) # knots = 10
+rsqfullsp2 <- summary(spfull2)$r.sq
+
+lmfull1 <- lm(life_exp ~ income_com + total_exp, data = ds)
+rsqlmfull1 <- summary(lmfull1)$r.squared
+
+
+```
+
+```{r echo=FALSE}
+sp1s <- gam(life_exp~ s(total_exp, bs="cr",k=5) + status,data=ds)
+rsp1s<- summary(sp1s)$r.sq
+
+lmtes <- lm(life_exp ~ total_exp + status_ind, data = ds)
+rlmtes <- summary(lmtes)$r.squared
+```
+
+```{r echo=FALSE}
+sp2s <- gam(life_exp~ s(income_com, bs="cr",k=3) + status, data=ds) # knots = 10
+rsp2s <- summary(sp2s)$r.sq
+
+lmics <- lm(life_exp ~ income_com + status, data = ds)
+rlmics <- summary(lmics)$r.squared
+```
+
+```{r echo=FALSE}
+spfulls1 <- gam(life_exp~ s(income_com,bs="cr",k=3) + total_exp + status, data=ds) # knots = 10
+rspfulls1 <- summary(spfulls1)$r.sq
+
+spfulls2 <- gam(life_exp~ s(total_exp,bs="cr",k=3) + income_com + status, data=ds) # knots = 10
+rspfulls2 <- summary(spfulls2)$r.sq
+
+lmfull1s <- lm(life_exp ~ income_com + total_exp + status, data = ds)
+rlmfulls <- summary(lmfull1s)$r.squared
+
+```
+
+\newpage
+
+
+# Conclusion and Discussion
+
+## Comparing all spline models
+```{r echo=FALSE, fig.width=6, fig.height=4}
+dfsp <- data.frame(models = c("total expenditure as smooth terms",
+                              "income composition of resources as smooth terms",
+                              "income composition of resources as smooth terms adjusted by total expenditure",
+                              "total expenditure as smooth terms adjusted by income composition of resources",
+                              "total expenditure as smooth terms adjusted by status",
+                              "income composition of resources as smooth terms adjusted by status",
+                              "income composition of resources as smooth terms adjusted by total expenditure and status",
+                              "total expenditure as smooth terms adjusted by income composition of resources and status"),
+                   R_square = c(rsqsp1, rsqsp2, rsqfullsp1, rsqfullsp2, rsp1s, rsp2s, rspfulls1, rspfulls2))
+
+knitr::kable(dfsp, caption = "Comparing all R squared of all spline models")
+plot(spfull1)
+```
+The model of income composition of resources as smooth terms and adjusted by total expenditure has the highest R squared value, which is 0.79086.  
+Looking at the spline model we have, the trend is not curvy, which indicate that a liner model may be preferred to reduce overfitting.
+
+\newpage
+
+## Comparing all linear models
+
+```{r echo=FALSE}
+dflm <- data.frame(models = c("total expenditure as predictor",
+                              "income composition of resources as predictor",
+                              "total expenditure and income composition as predictor",
+                              "total expenditure and status as predictor",
+                              "income composition of resources and status as predictor",
+                              "total expenditure, income composition, and status as predictor"),
+                   R_square = c(rsqlm1, rsqlm2, rsqlmfull1, rlmtes, rlmics, rlmfulls))
+
+knitr::kable(dflm, caption = "Comparing all R squared of all linear models")
+```
+
+According to the all R squared value we have for all linear models, the one with all predictors have the highest R squared. However, linear model with total expenditure and income composition as predictor also have pretty high R squared. Hence, we need to conduct t test to see if any predictor is not significant.
+
+```{r echo=FALSE}
+dflmcoef <- data.frame(summary(lmfull1s)$coef)
+knitr::kable(dflmcoef, caption = "Significance of each predictors in full linear model")
+```
+According to the p-values we have for each predictor in the linear model, we can see that total expenditure and income composition  are quite statistically significant variables in the model, if the significance level is 0.05. However, development status is not as significant as others. Hence, we could remove it to reduce complexity of our model.
+
+```{r fig.width=8, fig.height=4.5, echo=FALSE}
+par(mfrow=c(2,2))
+plot(lmfull1)
+```
+
+The residuals vs fitted plot shows the linearity is not violated since no curving trend. The QQ plot shows that the normality may hold but a large deviation exist on the left tail. In the scale-location plot, we do not have a fanning pattern that indicate unequal variances. In the leverage plot, we do not have groups of influential points that may pull our model. Hence, we do have a good fit since assumptions are mostly satisfied.
+
+## Comparing picked linear model with picked spline model
+
+```{r echo=FALSE}
+dfcp <- data.frame(models = c("linear model", "spline model"),
+                   R_square = c(rsqlmfull1, rsqfullsp1))
+knitr::kable(dfcp, caption = "Comparing picked linear model with picked spline model")
+```
+
+According to the table we have, the R squared value for those two models are pretty close. Though spline model yields better fit based on the score, a linear model may be better choice since the spline model we plotted is very close to a linear line. Choosing a linear model with almost the same wellness of fitting could reduce overfitting. In conclusion, the linear model with income composition of resources and total expenditure as predictors is our final model.
+
+## Answering research question
+
+Research question: Is government health expenditure have higher impact on life expectancy than Human Development Index? Does it also depends on the development status of the country?
+
+According to the data exploratory plots we have, the relationship between health expenditure and life expectancy is not strong. The models that only contains total expenditure and status have adjusted R squared less than 0.04, which means they fitted badly. However, in most of our plots, the relationship between HDI and life expectancy is strong. We also have pretty well fitted models with HDI as predictor have adjusted R squared around 0.79. Furthermore, adding development status into our model does not have any significant effect according to the model comparison results.
+
+Hence the answer to our research question is no and development status does not play an important role in current situation with total health expenditure and HDI. However, the results from model selection process also shows that a linear model that include both total health expenditure and HDI will have better predict on life expectancy.
+
+
+## Discussion and limitation
+
+According to the result we have, if the governments aim to increase life expectancy of the population, they should focus on factors that will increase the HDI. Not just spending too much money health development. In may cases, better health treatment and medical technologies does not benefit everyone. For most of the population, even poorer people, their health conditions need much longer time to respond to larger health expenditure than richer people. Additionally, people who would like to search for some counties to stay and try to live longer could choose countries with high HDI, rather than high health expenditure.
+  
+Limitations:  
+1. Since we impute NAs by mean value, we may result in biased standard error, variance, and sample mean. Our estimate may be pulled by other observations.  
+2. Since we have 16 years of observations per country and we investigate the dataset as a whole, our observations are not totally independent. Also, we ignored the structural difference between countries, like race and climate.  
+3. Though in model comparison, some spline models have better performance than the linear model, picking a spline model also increase our risk on onverfitting.  
+4. We only fitted spline models with 3 knots. We should also vary it to compare spline models with different knot numbers.

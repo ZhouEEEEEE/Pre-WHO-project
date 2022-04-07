@@ -1,0 +1,1 @@
+"0","data <- read.csv('Life Expectancy Data.csv', check.names = F)"

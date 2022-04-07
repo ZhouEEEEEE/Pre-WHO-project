@@ -1,0 +1,549 @@
+---
+title: "JSC370-HW3"
+output:
+  pdf_document: default
+  html_document: default
+always_allow_html: true
+---
+
+
+# Introduction
+
+In this assignment, I focus on data scraping and text mining tasks. I looked up for the papers under the term "sars-cov-2 vaccine" in NCBI by its API. I extracted the id, title, published journal, publication date, and the information about abstracts of some papers by using regular expressions and GET() method.
+
+In the second part, I conducted tokenization and stop words removing on the given text data and also performed them by each search term to find top 5 common tokens. Additionally, I also find top 10 most common bigrams in all the abstracts. Lastly, I calculated TF-IDF value for each word-search term combination, found the top 5 tokens for each search term by TF-IDF value, and compared the result with simple tokenization result we got before.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+library(httr)
+library(tidytext)
+library(readr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(wordcloud)
+library(kableExtra)
+```
+
+
+# APIs
+
+## Finding papers
+
+```{r echo=FALSE, counter-pubmed, eval=TRUE}
+# Downloading the website
+website <- xml2::read_html("https://pubmed.ncbi.nlm.nih.gov/?term=sars-cov-2+vaccine")
+
+# Finding the counts
+counts <- xml2::xml_find_first(website, "/html/body/main/div[9]/div[2]/div[2]/div[1]/div[1]/span")
+
+# Turning it into text
+counts <- as.character(counts)
+
+# Extracting the data using regex
+# stringr::str_extract(counts, "[0-9,]+")
+```
+We are able to find `r counts` papers under the term 'sars-cov-2 vaccine' in NCBI API.  
+
+We use the following GET() method to retrieved pubmed ids under term 'sars-cov-2 vaccine'.
+```{r papers-covid-canada, echo = TRUE, eval=TRUE}
+query_ids <- GET(
+  url   = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+  query = list(
+    db = 'pubmed',
+    term = 'sars-cov-2 vaccine',
+    retmax = 1000
+  )
+)
+
+```
+
+```{r echo=FALSE}
+# Extracting the content of the response of GET
+ids <- httr::content(query_ids)
+```
+
+
+```{r echo=FALSE, get-ids, eval = TRUE}
+# Turn the result into a character vector
+ids <- as.character(ids)
+
+# Find all the ids 
+ids <- unlist(stringr::str_extract_all(ids, "<Id>[0-9]+</Id>"))
+
+# Remove all the leading and trailing <Id> </Id>. Make use of "|"
+ids <- stringr::str_remove_all(ids, "<Id>|</Id>")
+ids <- head(ids, 250)
+```
+
+I only keep the first 250 ids.  
+By the pumbed ids we have, we download the details of each paper also by GET() method.
+
+```{r get-abstracts, echo = TRUE, eval = TRUE}
+publications <- GET(
+  url   = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi",
+  query = list(
+    db = 'pubmed',
+    id = paste(ids, collapse = ","),
+    retmax = 1000,
+    rettype = 'abstract'
+    )
+)
+```
+
+```{r echo=FALSE, one-string-per-response, eval = TRUE}
+# Turning the output into character vector
+publications <- httr::content(publications)
+publications_txt <- as.character(publications)
+
+pub_char_list <- xml2::xml_children(publications)
+pub_char_list <- sapply(pub_char_list, as.character)
+```
+
+## Create dataset that contains pumbed id, title, journal published, publication date, and the abstract of each paper
+
+```{r echo=FALSE, extracting-last-bit, eval = TRUE}
+library(stringr)
+
+abstracts <- str_extract(pub_char_list, "<Abstract>(\\n|.)+</Abstract>")
+abstracts <- 
+  stringr::str_remove_all(abstracts, "<CopyrightInformation>.*[\n]?")
+abstracts <- 
+  stringr::str_remove_all(abstracts, "<[^>]*>[\n]?[\\s]*")# Clean all extra white space and new line characters
+abstracts <- str_remove_all(abstracts, "</?[[:alnum:]]+>") # Clean all HTML tags
+#table(is.na(abstracts))
+
+# abs_na <- table(is.na(abstracts))
+knitr::kable(sum(is.na(abstracts)), caption = "Number of papers that missing abstracts")%>%
+  kable_styling(latex_options = "HOLD_position")
+
+```
+
+
+```{r echo=FALSE, process-titles, eval = TRUE}
+titles <- str_extract(pub_char_list, "<ArticleTitle>(\\n|.)+</ArticleTitle>")
+titles <- 
+  stringr::str_remove_all(titles, "<[^>]*>[\n]?[\\s]*")
+titles <- str_remove_all(titles, "</?[[:alnum:]]+>")
+# titles_na <- table(is.na(titles))
+knitr::kable(sum(is.na(titles)), caption = "Number of papers that missing titles") %>%
+  kable_styling(latex_options = "HOLD_position")
+
+```
+
+```{r echo=FALSE, process-journal, eval = TRUE}
+journal <- 
+  stringr::str_extract(pub_char_list, "</JournalIssue>\n[\\s]+<Title>[^<]*</Title>\n")
+journal <- 
+  stringr::str_remove_all(journal, "<[^>]*>[\n]?[\\s]*")
+journal <- str_remove_all(journal, "</?[[:alnum:]]+>")
+# table(is.na(journal))
+knitr::kable(sum(is.na(journal)), caption = "Number of papers that missing published journal") %>%
+  kable_styling(latex_options = "HOLD_position")
+
+```
+
+```{r echo=FALSE, process-pubdate, eval = TRUE}
+pubdate <- str_extract(pub_char_list, "<PubDate>(\\n|.)+</PubDate>")
+pubdate <- 
+  stringr::str_remove_all(pubdate, "<[^>]*>[\n]?")
+pubdate <- str_remove_all(pubdate, "</?[[:alnum:]]+>")
+pubdate <- str_replace_all(pubdate, "\\s+", " ")
+pubdate <- stringr::str_remove_all(pubdate, "^[\\s]|[\\s]$")
+# table(is.na(pubdate))
+knitr::kable(sum(is.na(pubdate)), caption = "Number of papers that missing publication data") %>%
+  kable_styling(latex_options = "HOLD_position")
+
+```
+
+
+According to the 4 tables we have, there are 33 papers miss an abstract. However, there are no paper missing title, published journal, and publication date. Then, we form the dataset.  
+
+The dataset containing the following:
+
+-   1\. Pubmed ID number,
+
+-   2\. Title of the paper,
+
+-   3\. Name of the journal where it was published,
+
+-   4\. Publication date, and
+
+-   5\. Abstract of the paper (if any).
+
+```{r build-db, echo = TRUE, eval = TRUE}
+database <- data.frame(
+  PubMedID = ids,
+  Title = titles,
+  Journals = journal,
+  Pubdates = pubdate,
+  Abstract = abstracts
+)
+```
+
+
+\newpage
+
+# Text Mining
+
+## Tokenization on the whole dataset
+
+
+```{r warning=FALSE, message=FALSE, echo= FALSE}
+abs <- read_csv("pubmed.csv")
+```
+
+### Tokenization before removing stop words
+
+```{r echo=FALSE, fig.width=10, fig.height=4}
+tokens <- abs %>%
+  select(abstract) %>%
+  unnest_tokens(word, abstract) %>%
+  group_by(word) %>%
+  summarise(word_frequency = n()) %>%
+  arrange(across(word_frequency, desc)) %>%
+  head(10)
+
+tokens %>%
+  ggplot(aes(reorder(word, word_frequency), word_frequency)) +
+  geom_bar(stat = 'identity') + coord_flip() +
+  xlab("Word") +
+  ylab("Count") +
+  theme_minimal()
+```
+
+After our first tokenization, the histograms shows that the most common token in abstracts is 'the' and the top 10 common tokens are: 'the', 'of', 'and', 'in', 'to', 'a', 'with', 'covid', '19', and 'is'. Most of the tokens are articles, prepositions, pronouns, and conjunctions and they may be very common in any text files, which means they may not tell too much information about our dataset. Hence, we should try to remove them and find whether there are more meaningful common tokens.
+
+The current word cloud graph is shown below.
+
+```{r echo=FALSE, fig.width=4, fig.height=4}
+wordcloud(tokens$word, tokens$word_frequency)
+```
+
+
+### Tokenization after removing stop words
+
+
+```{r echo=FALSE, fig.width=10, fig.height=4}
+tokens <- abs %>%
+  select(abstract) %>%
+  unnest_tokens(word, abstract) %>%
+  anti_join(stop_words, by = "word") %>%
+  subset(!grepl("^\\d+$", word)) %>%
+  group_by(word) %>%
+  summarise(word_frequency = n()) %>%
+  arrange(across(word_frequency, desc)) %>%
+  head(10)
+
+tokens %>%
+  ggplot(aes(reorder(word, word_frequency), word_frequency)) +
+  geom_bar(stat = 'identity') + coord_flip() +
+  xlab("Word") +
+  ylab("Count") +
+  theme_minimal()
+```
+
+In this tokenization, we removed stop words and digital tokens. The top 10 common tokens are: 'covid', 'patients', 'cancer', 'prostate', 'disease', 'pre', 'eclampsia', 'preeclampsia', 'treatment', and 'clinical'. We can see that the tokens are more meaningful or medical-related than the tokens we had in the first tokenization.
+
+The current word cloud graph is shown below.
+
+```{r echo=FALSE, fig.width=4, fig.height=4}
+wordcloud(tokens$word, tokens$word_frequency)
+
+```
+
+
+\newpage
+
+
+## Subsetting the data for each search term
+
+To find the 5 most common tokens for each search term, I subset the abstract data by each search term and formed 5 datasets. I performed tokenizations on each of the data we just created.
+```{r echo=FALSE}
+cov <- select(filter(abs, term == "covid"), c(abstract))
+men <- select(filter(abs, term == "meningitis"), c(abstract))
+proc <- select(filter(abs, term == "prostate cancer"), c(abstract))
+cys <- select(filter(abs, term == "cystic fibrosis"), c(abstract))
+pre <- select(filter(abs, term == "preeclampsia"), c(abstract))
+```
+## Five most common tokens for each search term after removing stopwords and digital tokens
+
+### For search term "covid"
+
+```{r echo=FALSE, fig.width=10, fig.height=4}
+tokens <- cov %>%
+  select(abstract) %>%
+  unnest_tokens(word, abstract) %>%
+  anti_join(stop_words, by = "word") %>%
+  subset(!grepl("^\\d+$", word)) %>%
+  group_by(word) %>%
+  summarise(word_frequency = n()) %>%
+  arrange(across(word_frequency, desc)) %>%
+  head(5)
+
+tokens %>%
+  ggplot(aes(reorder(word, word_frequency), word_frequency)) +
+  geom_bar(stat = 'identity') + coord_flip() +
+  xlab("Word") +
+  ylab("Count") +
+  theme_minimal()
+```
+
+The 5 most common tokens when search term is 'covid' are: 'covid', 'patients', 'disease', 'pandemic', and 'coronavirus'.
+
+
+### For search term "meningitis"
+
+```{r echo=FALSE, fig.width=10, fig.height=4}
+tokens <- men %>%
+  select(abstract) %>%
+  unnest_tokens(word, abstract) %>%
+  anti_join(stop_words, by = "word") %>%
+  subset(!grepl("^\\d+$", word)) %>%
+  group_by(word) %>%
+  summarise(word_frequency = n()) %>%
+  arrange(across(word_frequency, desc)) %>%
+  head(5)
+
+tokens %>%
+  ggplot(aes(reorder(word, word_frequency), word_frequency)) +
+  geom_bar(stat = 'identity') + coord_flip() +
+  xlab("Word") +
+  ylab("Count") +
+  theme_minimal()
+
+```
+
+The 5 most common tokens when search term is 'meningitis' are: 'patients', 'meningitis', 'meningeal', 'csf', and 'clinical'.
+
+
+### For search term "prostate cancer"
+
+```{r echo=FALSE, fig.width=10, fig.height=4}
+tokens <- proc %>%
+  select(abstract) %>%
+  unnest_tokens(word, abstract) %>%
+  anti_join(stop_words, by = "word") %>%
+  subset(!grepl("^\\d+$", word)) %>%
+  group_by(word) %>%
+  summarise(word_frequency = n()) %>%
+  arrange(across(word_frequency, desc)) %>%
+  head(5)
+
+tokens %>%
+  ggplot(aes(reorder(word, word_frequency), word_frequency)) +
+  geom_bar(stat = 'identity') + coord_flip() +
+  xlab("Word") +
+  ylab("Count") +
+  theme_minimal()
+
+```
+
+The 5 most common tokens when search term is 'prostate cancer' are: 'cancer', 'prostate', 'patients', 'treatment', and 'disease'.
+
+### For search term "cystic fibrosis"
+
+```{r echo=FALSE, fig.width=10, fig.height=4}
+tokens <- cys %>%
+  select(abstract) %>%
+  unnest_tokens(word, abstract) %>%
+  anti_join(stop_words, by = "word") %>%
+  subset(!grepl("^\\d+$", word)) %>%
+  group_by(word) %>%
+  summarise(word_frequency = n()) %>%
+  arrange(across(word_frequency, desc)) %>%
+  head(5)
+
+tokens %>%
+  ggplot(aes(reorder(word, word_frequency), word_frequency)) +
+  geom_bar(stat = 'identity') + coord_flip() +
+  xlab("Word") +
+  ylab("Count") +
+  theme_minimal()
+```
+
+The 5 most common tokens when search term is 'cystic fibrosis' are: 'fibrosis', 'cystic', 'cf', 'patients', and 'disease'.
+
+### For search term "preeclampsia"
+
+```{r echo=FALSE, fig.width=10, fig.height=4}
+tokens <- pre %>%
+  select(abstract) %>%
+  unnest_tokens(word, abstract) %>%
+  anti_join(stop_words, by = "word") %>%
+  subset(!grepl("^\\d+$", word)) %>%
+  group_by(word) %>%
+  summarise(word_frequency = n()) %>%
+  arrange(across(word_frequency, desc)) %>%
+  head(5)
+
+tokens %>%
+  ggplot(aes(reorder(word, word_frequency), word_frequency)) +
+  geom_bar(stat = 'identity') + coord_flip() +
+  xlab("Word") +
+  ylab("Count") +
+  theme_minimal()
+```
+
+The 5 most common tokens when search term is 'preeclampsia' are: 'pre', 'eclampsia', 'preeclampsia', 'women', and 'pregnancy'.
+
+\newpage
+
+# Bigrams
+
+We tokenize the abstracts into bigrams with removing stop words and digital tokens.
+
+```{r echo=FALSE}
+
+tokens <- abs %>%
+  select(abstract) %>%
+  unnest_tokens(bigram, abstract, token = "ngrams", n=2) %>%
+  group_by(bigram) %>%
+  summarise(bigram_frequency = n()) %>%
+  separate(bigram, c("word1", "word2"), extra = "drop", remove=F, sep = " ", fill = "right")%>% 
+  anti_join(stop_words, by = c("word1" = "word")) %>%
+  anti_join(stop_words, by = c("word2" = "word")) %>%
+  subset(!grepl("\\d+", bigram)) %>%
+  arrange(desc(bigram_frequency)) %>%
+  head(10)
+
+```
+
+
+
+```{r echo=FALSE}
+  
+tokens %>%
+  ggplot(aes(reorder(bigram, bigram_frequency), bigram_frequency)) +
+  geom_bar(stat = "identity") + coord_flip() +
+  xlab("Bigram") +
+  ylab("Count") +
+  theme_minimal()
+```
+
+According to the histogram we have above, the 10 most common bigrams are: 'severe pre', 'sars cov', 'risk factors', 'prostate specific', 'prostate cancer', 'pregnant women', 'pre eclampsia', 'cystic fibrosis', 'coronavirus disease', and 'blood pressure'.
+
+\newpage
+
+# TF-IDF
+
+Calculating the TF-IDF value for each word-search term combination.
+
+```{r echo=TRUE}
+tf <- abs %>%
+ unnest_tokens(abstract, abstract)%>%
+ count(abstract, term) %>%
+ bind_tf_idf(abstract, term, n) %>%
+ arrange(desc(tf_idf))
+
+```
+
+## Search term 'covid'
+
+In this section, we found top 5 tokens from search term 'covid' with the highest TF-IDF value.
+```{r eval = TRUE, echo=FALSE}
+tf_cov <- select(filter(tf, term == "covid"), c(abstract, tf_idf))
+tf_cov_5 <- tf_cov %>% head(5)
+knitr::kable((tf_cov_5), caption = "5 tokens from search term 'covid' with the highest TF-IDF value") %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+
+According to the table we have above, 5 tokens from search term 'covid' with the highest TF-IDF value are: 'covid', 'pandemic', 'coronavirus', 'sars', and 'cov'.
+
+```{r echo=FALSE}
+aaa <- data.frame(Tokenization = c('covid', 'patients', 'disease', 'pandemic', 'coronavirus'),
+                   TFIDF = c('covid', 'pandemic', 'coronavirus', 'sars', 'cov'))
+knitr::kable((aaa), caption = "Top 5 tokens with highest frequency and highest TF-IDF values in descending order") %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+The top 5 tokens with highest TF-IDF value different from 5 most common tokens by excluding 'patients' and 'disease' and including 'sars' and 'cov' for search term 'covid'.
+
+\newpage
+
+## Search term "meningitis"
+
+```{r echo=FALSE}
+tf_men <- select(filter(tf, term == "meningitis"), c(abstract, tf_idf))
+tf_men_5 <- tf_men %>% head(5)
+knitr::kable((tf_men_5), caption = "5 tokens from search term 'meningitis' with the highest TF-IDF value") %>%
+  kable_styling(latex_options = "HOLD_position")
+
+```
+
+According to the table we have above, 5 tokens from search term 'meningitis' with the highest TF-IDF value are: 'meningitis', 'meningeal', 'pachymeningitis', 'csf', and 'meninges'.
+
+```{r echo=FALSE}
+aaa <- data.frame(Tokenization = c('patients', 'meningitis', 'meningeal', 'csf', 'clinical'),
+                   TFIDF = c('meningitis', 'meningeal', 'pachymeningitis', 'csf', 'meninges'))
+knitr::kable((aaa), caption = "Top 5 tokens with highest frequency and highest TF-IDF values in descending order") %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+The top 5 tokens with highest TF-IDF value different from 5 most common tokens by excluding 'patients' and 'clinical' and including 'pachymeningitis' and 'meninges' for search term 'meningitis'.
+
+\newpage
+
+## Search term "prostate cancer"
+
+```{r echo=FALSE}
+tf_pro <- select(filter(tf, term == "prostate cancer"), c(abstract, tf_idf))
+tf_pro_5 <- tf_pro %>% head(5)
+knitr::kable((tf_pro_5), caption = "5 tokens from search term 'prostate cancer' with the highest TF-IDF value") %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+According to the table we have above, 5 tokens from search term 'prostate cancer' with the highest TF-IDF value are: 'prostate', 'androgen', 'psa', 'prostatectomy', and 'castration'.
+
+```{r echo=FALSE}
+aaa <- data.frame(Tokenization = c('cancer', 'prostate', 'patients', 'treatment',  'disease'),
+                   TFIDF = c('prostate', 'androgen', 'psa', 'prostatectomy', 'castration'))
+knitr::kable((aaa), caption = "Top 5 tokens with highest frequency and highest TF-IDF values in descending order") %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+The top 5 tokens with highest TF-IDF value different from 5 most common tokens by excluding 'cancer', 'patients', 'treatment' and 'disease' and including 'androgen', 'psa', 'prostatectomy', and 'castration' for search term 'prostate cancer'.
+
+\newpage
+
+## Search term "cystic fibrosis"
+
+```{r echo=FALSE}
+tf_cys <- select(filter(tf, term == "cystic fibrosis"), c(abstract, tf_idf))
+tf_cys_5 <- tf_cys %>% head(5)
+knitr::kable((tf_cys_5), caption = "5 tokens from search term 'cystic fibrosis' with the highest TF-IDF value") %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+According to the table we have above, 5 tokens from search term 'cystic fibrosis' with the highest TF-IDF value are: 'cf', 'fibrosis', 'cystic', 'cftr', and 'sweat'.
+
+```{r echo=FALSE}
+aaa <- data.frame(Tokenization = c('fibrosis', 'cystic', 'cf', 'patients', 'disease'),
+                   TFIDF = c('cf', 'fibrosis', 'cystic', 'cftr', 'sweat'))
+knitr::kable((aaa), caption = "Top 5 tokens with highest frequency and highest TF-IDF values in descending order") %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+The top 5 tokens with highest TF-IDF value different from 5 most common tokens by excluding 'patients' and 'disease' and including 'cftr' and 'sweat' for search term 'cystic fibrosis'.
+
+\newpage
+
+## Search term "preeclampsia"
+
+```{r echo=FALSE}
+tf_pre <- select(filter(tf, term == "preeclampsia"), c(abstract, tf_idf))
+tf_pre_5 <- tf_pre %>% head(5)
+knitr::kable((tf_pre_5), caption = "5 tokens from search term 'preeclampsia' with the highest TF-IDF value") %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+According to the table we have above, 5 tokens from search term 'preeclampsia' with the highest TF-IDF value are: 'eclampsia', 'preeclampsia', 'pregnancy', 'maternal', and 'gestational'.
+
+```{r echo=FALSE}
+aaa <- data.frame(Tokenization = c('pre', 'eclampsia', 'preeclampsia', 'women',  'pregnancy'),
+                   TFIDF = c('eclampsia', 'preeclampsia', 'pregnancy', 'maternal', 'gestational'))
+knitr::kable((aaa), caption = "Top 5 tokens with highest frequency and highest TF-IDF values in descending order") %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+The top 5 tokens with highest TF-IDF value different from 5 most common tokens by excluding 'pre' and 'women' and including 'maternal' and 'gestational' for search term 'preeclampsia'.

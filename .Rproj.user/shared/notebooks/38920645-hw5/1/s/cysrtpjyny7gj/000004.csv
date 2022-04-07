@@ -1,0 +1,2 @@
+"0","dt1 %>%"
+"0","  plot_ly(x = ~`Income composition of resources`, y = ~`Life expectancy`, color = ~Country, type = ""scatter"", mode = ""lines"")"
