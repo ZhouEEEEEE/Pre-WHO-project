@@ -101,31 +101,51 @@ p2_plot <- new_data_2013 %>%
          xaxis = list(title = "Adult Mortality"),
          hovermode = "compare")
 
-p3_plot <- dt1 %>%
-  plot_ly(x = ~`Income composition of resources`, y = ~`Life expectancy`, color = ~Country, type = "scatter", mode = "lines")
+# Straight lines are 'Haiti', 'United Kingdom of Great Britain and Northern Ireland', 'United Republic of Tanzania', 'Cote d'Ivoire', and 'Republic of Korea'(Later Modification).
+
+line_data <- as.tibble(dt1)
+
+line_data <- line_data %>%
+  filter(Country!="Haiti") %>%
+  filter(Country!="United Kingdom of Great Britain and Northern Ireland") %>%
+  filter(Country!='United Republic of Tanzania') %>%
+  filter(Country!="Cote d'Ivoire") %>%
+  filter(Country!='Republic of Korea')
+
+p3_plot <- line_data %>%
+  plot_ly(x = ~`Income composition of resources`, y = ~`Life expectancy`, color = ~Country, type = "scatter", mode = "lines") %>%
+  layout(title = "Life Expectancy-ICR",
+         yaxis = list(title = "Life expectancy"),
+         xaxis = list(title = "Income Composition of Resources"),
+         hovermode = "compare")
 ```
 
 # {.tabset}
 
-## First plot
-
-Testing for sharing information about plot 1
+## Scatterplot of Life Expectancy vs Income Composition of Resources
 
 ```{r warning=FALSE, echo=FALSE}
 p1_plot
 ```
+In the scatter plot of life expectancy vs income composition of resources, we fitted a cubic spline model between the two variables and grouped the points by development status in different color. We can clearly see a positive linear trend between the two variables. By selecting each group of development status, most of the developed countries (red point) having a significant higher income composition of resources and high life expectancy than that of developing countries (blue points).
 
-## Second plot
+## Scatterplot of Life Expectancy vs Adult-Mortality
 
 ```{r warning=FALSE, echo=FALSE}
 p2_plot
 ```
 
-## Third plot
+According to the plot we have for Life Expectancy vs Adult-Mortality. We able to examine their relationship, which is a inverse linear relationship. Higher adult Mortality may result in low life expectancy. I also control the size of the dot by each county's total health expenditure. We can see that countries with relatively low adult mortality and high life expectancy tend to have higher health expenditure. However, we also have a country 'Lesotho' that spend a lot on health expenditure but failed to reduce adult mortality and increase life expectancy.
+
+## Line Graph of Life Expectancy vs Income Composition of Resources
 
 ```{r warning=FALSE, echo=FALSE}
 p3_plot
 ```
+
+In this line graph, we have a line for life expectancy vs income composition of resources for a country. We can investigate that, generally, higher income composition of resources result in higher life expectancy in most of the countries. Hence, we could conclude that there is a positive relationship between life expectancy and income composition of resources, which is Human Development Index, from this graph. We removed countries 'Haiti', 'United Kingdom of Great Britain and Northern Ireland', 'United Republic of Tanzania', 'Cote d'Ivoire', and 'Republic of Korea' since their ICR values are imputed as they were missing in data collection.
+
+Straight lines are 'Haiti', 'United Kingdom of Great Britain and Northern Ireland', 'United Republic of Tanzania', 'Cote d'Ivoire', and 'Republic of Korea'(Later Modification).
 
 # {-}
 
